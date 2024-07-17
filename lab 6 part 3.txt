@@ -1,0 +1,226 @@
+//lab 6 part 3
+
+module part3(
+    input logic Clock,
+    input logic Reset,
+    input logic Go,
+    input logic [3:0] Divisor,
+    input logic [3:0] Dividend, output logic [3:0] Quotient, output logic [3:0] Remainder,
+    output logic ResultValid
+);
+
+    // lots of wires to connect our datapath and control
+    logic ld_a, ld_q, ld_d, ld_r, shift, sub, set;
+    logic ld_alu_out;
+    logic [1:0] alu_select_a, alu_select_b;
+    logic alu_op;
+
+    control C0(
+        .clk(Clock),
+        .reset(Reset),
+
+        .go(Go),
+
+        .ld_alu_out(ld_alu_out),
+        
+        .ld_a(ld_a),
+        .ld_q(ld_q),
+        .ld_r(ld_r),
+        .ld_d(ld_d),
+	.set(set), .sub(sub), .set(set),
+        
+	.dividend(Dividend), .divisor(Divisor),
+        .alu_select_a(alu_select_a),
+        .alu_select_b(alu_select_b),
+        .alu_op(alu_op),
+	.quotient(Quotient), .remainder(Remainder)
+    );
+
+    datapath D0(
+        .clk(Clock),
+        .reset(Reset),
+
+        .ld_alu_out(ld_alu_out),
+        
+        .ld_a(ld_a),
+        .ld_q(ld_q),
+        .ld_r(ld_r),
+        .ld_d(ld_d),
+.set(set), .sub(sub), .set(set),
+
+.dividend(Dividend), .divisor(Divisor),
+        .alu_select_a(alu_select_a),
+        .alu_select_b(alu_select_b),
+        .alu_op(alu_op),
+
+        .data_in(DataIn),
+ 	.quotient(Quotient), .remainder(Remainder) //these are data_results
+    );
+
+ endmodule
+
+
+module control(
+    input logic clk,
+    input logic reset,
+    input logic go,
+
+    output logic ld_a, ld_d, ld_r, ld_q, shift, sub, set,
+    output logic ld_alu_out,
+output logic [3:0] divisor, dividend, quotient, remainder
+    output logic [1:0] alu_select_a, alu_select_b,
+    output logic alu_op,
+    output logic result_valid
+    );
+
+    typedef enum logic [3:0]  { S_LOAD_RST    = 'd0,
+                                S_LOAD       = 'd1,
+                                S_LOAD_WAIT   = 'd2,
+                                S_CYCLE_0       = 'd3,
+                                S_CYCLE_1       = 'd4, 
+				S_CYCLE_2 		= 'd5,
+				S_CYCLE_3 		= 'd6} statetype;
+                                
+    statetype current_state, next_state;                            
+
+    // Next state logic aka our state table
+    always_comb begin
+        case (current_state)
+            S_LOAD_RST: next_state = go ? S_LOAD_WAIT : S_LOAD_RST; // Loop in current state until value is input
+            S_LOAD: next_state = go ? S_LOAD_WAIT : S_LOAD; // Loop in current state until value is input
+            S_LOAD_WAIT: next_state = go ? S_LOAD_WAIT : S_CYCLE_0; 
+            S_CYCLE_0: next_state = S_CYCLE_1;
+            S_CYCLE_1: next_state = S_CYCLE_2;
+	S_CYCLE_2: next_state = S_CYCLE_3;
+	S_CYCLE_3: next_state = S_LOAD; // we will be done our operations, start over after
+            default:   next_state = S_LOAD_RST;
+        endcase
+    end // state_table
+
+    // output logic logic aka all of our datapath control signals
+    always_comb begin
+        // By default make all our signals 0 even before the case starts, so no need to reset things to 0
+        ld_alu_out = 1'b0;
+        ld_a = 1'b0;
+        ld_d = 1'b0;
+		ld_q = 1'b0;
+        ld_r = 1'b0;
+        alu_select_a = 2'b00;
+        alu_select_b = 2'b00;
+        alu_op       = 1'b0;
+        result_valid = 1'b0;
+
+        case (current_state)
+            S_LOAD_RST: begin
+                ld_a = 1'b1;
+                end
+            S_LOAD: begin
+                ld_q = 1'b1;
+		ld_d = 1'b1;
+                result_valid = 1'b1;
+                end
+            S_CYCLE_0: begin // Do bit 0
+                shift = 1'b1;
+		set = 1'b1;
+		sub = 1'b1;
+            end
+	S_CYCLE_1: begin // do bit 1
+                shift = 1'b1;
+		set = 1'b1;
+		sub = 1'b1;
+		end
+	S_CYCLE_2: begin // do bit 2
+                shift = 1'b1;
+		set = 1'b1;
+		sub = 1'b1;
+        end
+	S_CYCLE_3: begin // do bit 3 and set
+                ld_r = 1'b1;
+		shift = 1'b1;
+		set = 1'b1;
+		sub = 1'b1;
+            end
+        // We don't need a default case since we already made sure all of our outputs were assigned a value at the start of the always block.
+        endcase
+    end // enable_signals
+
+    // current_state logicisters
+    always_ff@(posedge clk) begin
+        if(reset)
+            current_state <= S_LOAD_RST;
+        else
+            current_state <= next_state;
+    end // state_FFS
+endmodule
+
+module datapath(
+    input logic clk,
+    input logic reset,
+    input logic [3:0] divisor, dividend
+    input logic ld_alu_out,
+    input logic ld_a, ld_d, ld_q, ld_r,
+    // TODO: Add additional signals from control path here. 
+    input logic shift, sub, set,
+    input logic alu_op,
+    input logic [1:0] alu_select_a, alu_select_b,
+    output logic [3:0] quotient, remainder
+    );
+
+    // input logic logicisters
+    logic [4:0] a, d, q;
+
+    // output logic of the alu
+    logic [7:0] alu_out;
+    // alu input logic muxes
+    logic [7:0] alu_a, alu_b;
+
+    // registers a and b with associated logic
+    always_ff @(posedge clk) begin
+        if(reset) begin
+            a <= 5'b0;
+            d <= 5'b0;
+	    q <= 5'b0;
+        end
+        else begin
+            if(ld_a) a <= 5'b0;
+            if(ld_b) q <= dividend; 
+            if(ld_d) d <= divisor;
+        end
+    end
+
+    // output logic result logicister
+    always@(posedge clk) begin
+        if(reset) begin
+            quotient <= 4'b0;
+	    remainder <= 4'b0;
+        end
+        else
+            if(ld_r)
+                quotient <= q;
+		remainder <= a;
+    end
+
+    // The ALU input logic multiplexers
+    always_comb begin
+        if(shift) begin
+		a[3] = a[2];
+		a[2] = a[1];
+		a[1] = a[0];
+		a[0] = q[3];
+		q[3] = q[2];
+		q[2] = q[1];
+		q[0] = 1'b0;
+	end
+	
+	if(sub) begin
+		a = a - divisor;
+	end
+
+	if(a[4]) begin
+		a = a + divisor;
+	end
+
+	q[0] = ~a[4];
+    end
+
+endmodule
